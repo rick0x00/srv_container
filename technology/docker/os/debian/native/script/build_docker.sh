@@ -22,12 +22,11 @@ fi
 # ============================================================ #
 # start set variables
 
-os_distribution="Debian"
-os_version=("11" "bullseye")
+## variables above are automatically defined on end of function "check_os_system"
+#OS_DISTRIBUTION="Debian"
+#OS_VERSION=("11" "bullseye")
 
-database_engine="undefined"
-webserver_engine="undefined"
-
+## set host.domain.tld used on this application(if not defined is automaticaly used default values(hostname.arpha.local)). exemple:
 #HOSTNAME="docker"
 #DOMAIN="rick0x00"
 #GTLD="com"
@@ -43,28 +42,103 @@ TLD=${TLD:-"local"}
 FULL_DOMAIN=${FULL_DOMAIN:-"${DOMAIN:+${DOMAIN}${TLD:+.}}${TLD}"}
 FQDN=${FQDN:-"${HOSTNAME}.${FULL_DOMAIN}"}
 
-ADMIN_USER="admin"
-ADMIN_PASSWORD="admin"
-ADMIN_EMAIL="admin@localhost"
+## set default admin credential
+#ADMIN_USER="sysadmin"
+#ADMIN_PASSWORD="strongpassword"
+#ADMIN_EMAIL="sysadmin@${FULL_DOMAIN}"
 
-WEB_PROTOCOL="http"
-HTTP_PORT[0]="80" # http number Port
-HTTP_PORT[1]="tcp" # http protocol type
-ENABLE_GZIP="false"
-CERT_FILE=""
-KEY_FILE=""
+## set DATABASE engine used on this application
+#DATABASE_ENGINE="undefined"
+## set webserver engine used on this application
+#WEBSERVER_ENGINE="undefined"
 
-docker_DAEMON_FOREGROUND_EXECUTION_COMMAND='cd /usr/share/docker && /usr/share/docker/bin/docker server --pidfile=/var/run/docker.pid --config=/etc/docker/docker.ini --packaging=deb cfg:default.paths.provisioning=/etc/docker/provisioning cfg:default.paths.data=/var/lib/docker cfg:default.paths.logs=/var/log/docker cfg:default.paths.plugins=/var/lib/docker/plugins'
+### WEBSERVER vars
+## set basic specifications about web application
+#WEB_PROTOCOL="http"
+#WEB_HTTP_PORT[0]="80" # http number Port
+#WEB_HTTP_PORT[1]="tcp" # http protocol type
+#WEB_HTTPS_PORT[0]="443" # https number Port
+#WEB_HTTPS_PORT[1]="tcp" # https protocol type
+#WEB_ENABLE_TLS="false"
+#WEB_CERT_FILE="/etc/letsencrypt/live/${FULL_DOMAIN}/cert.pem"
+#WEB_KEY_FILE="/etc/letsencrypt/live/${FULL_DOMAIN}/key.pem"
 
-BUILD_PATH="/usr/local/src"
-WORKDIR="/var/www/"
-PERSISTENCE_VOLUMES=("/etc/docker/" "/var/log/")
-EXPOSE_PORTS="${HTTP_PORT[0]}/${HTTP_PORT[1]}}"
+### DATABASE vars
+## set basic specifications about database application
+#DATABASE_BIND_ADDRESS="127.0.0.1" # setting to listen only localhost
+##DATABASE_BIND_ADDRESS="0.0.0.0" # setting to listen for everybody
+#DATABASE_BIND_PORT="3306" # setting to listen on default MySQL port
+#
+#DATABASE_HOST="${DATABASE_BIND_ADDRESS:-localhost}"
+#DATABASE_PORT_NUMBER="${DATABASE_BIND_PORT:-3306}"
+#DATABASE_ADMIN_USER="root"
+#DATABASE_ADMIN_PASS="strongpassword"
+#
+#DATABASE_USER="db_user"
+#DATABASE_PASS="db_pass"
+#DATABASE_USER_ACCESS_HOST="localhost"
+#DATABASE_DB_NAME="db_name"
+#DATABASE_DB_CHARSET="utf8mb4"
+#DATABASE_DB_COLLATE="utf8mb4_unicode_ci"
+
+
+## set dns server to use on application
+DNS_SERVER_ADDRESS_IPv4="8.8.8.8"
+
+## more vars(util for docker instances)
+BUILD_PATH="/usr/local/src/"
+WORKDIR="/var/lib/docker/"
+PERSISTENCE_VOLUMES=("/var/lib/docker/" "/etc/docker/" "/var/log/")
+EXPOSE_PORTS="${HTTP_PORT[0]}/${HTTP_PORT[1]} ${HTTPS_PORT[0]}/${HTTPS_PORT[1]}"
 # end set variables
 # ============================================================ #
 # start definition functions
 # ============================== #
 # start complement functions
+
+function check_os_system(){
+    # Function to check OS system
+    echo " # ================================== #"
+    echo "   Check OS system support"
+
+    # Function to print the operating system version
+    print_os_info() {
+        echo "    Operating System: $1"
+        echo "    Version: $2"
+    }
+
+    # List of supported systems and versions(ADD VALIDATED SYSTEMS ABOVE)
+    declare -A supported_systems=(
+        ["debian"]="11"
+        ["ubuntu"]="20 22"
+    )
+
+    # Check if the file /etc/os-release exists
+    if [ -f /etc/os-release ]; then
+        source /etc/os-release
+
+        # Extract ID and detected_version_id from /etc/os-release
+        local detected_id=$(grep -oP '(?<=^ID=).*' /etc/os-release | tr -d '"')
+        local detected_version_id=$(grep -oP '(?<=^VERSION_ID=).*' /etc/os-release | tr -d '"')
+
+        # Check if the current system is supported
+        if [[ -n "${supported_systems[$detected_id]}" && " ${supported_systems[$detected_id]} " =~ " $detected_version_id " ]]; then
+            print_os_info "$detected_id" "$detected_version_id"
+            echo "    This system is supported."
+        else
+            print_os_info "$detected_id" "$detected_version_id"
+            echo "    This system is not supported."
+            exit 1
+        fi
+    else
+        echo "    File /etc/os-release not found."
+    fi
+
+    # Exporting OS info if not defined before
+    export OS_DISTRIBUTION="${OS_DISTRIBUTION:-$detected_id}"
+    export OS_VERSION="${OS_VERSION:-$detected_version_id}"
+    echo " # ================================== #"
+}
 
 function remove_space_from_beginning_of_line {
     #correct execution
@@ -88,183 +162,267 @@ function remove_space_from_beginning_of_line {
     sed -i "s/^[[:space:]]\{${spaces}\}//" "${file}"
 }
 
-function messenger_a() {
-    line_divisor="###########################################################################################"
+function messenger() {
+    local line_divisor
+    local message
+    local category
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --msg)
+                message="$2"
+                shift
+                ;;
+            --category)
+                category="$2"
+                shift
+                ;;
+            *)
+                echo "Argumento inválido: $1"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    case "$category" in
+        a)
+            line_divisor="###########################################################################################"
+            before_line_spacer="#####"
+            ;;
+        b)
+            line_divisor="==================================================================================="
+            before_line_spacer="####"
+            ;;
+        c)
+            line_divisor="+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+            before_line_spacer="###"
+            ;;
+        d)
+            line_divisor="-------------------------------------------------------------------"
+            before_line_spacer="##"
+            ;;
+        e)
+            line_divisor="..........................................................."
+            before_line_spacer="#"
+            ;;
+        *)
+            echo "Categoria inválida: $category"
+            return 1
+            ;;
+    esac
+
     echo "${line_divisor}"
-    echo "########## $* "
+    echo "${before_line_spacer} $message"
     echo "${line_divisor}"
 }
 
-function messenger_b() {
-    line_divisor="==================================================================================="
-    echo "${line_divisor}"
-    echo "######## $*"
-    echo "${line_divisor}"
+function check_software_is_installed() {
+    # check if software are installed
+    messenger --category c --msg "check if software are installed"
+
+    # Check if the number of arguments is correct
+    if [ $# -eq 0 ]; then
+        messenger --category e --msg "Usage: check_software_is_installed <package_name>"
+        exit 1
+    fi
+
+    local package_name="$*"
+
+    for package_check in ${package_name} ; do
+        messenger --category e --msg "checking if ${package_check} are installed..."
+        # Check the available package manager and use the appropriate command to check if the package is installed
+        if command -v dpkg &> /dev/nul l; then
+            # Debian-based system (dpkg)
+            if command -v ${package_check} &> /dev/null  ; then
+                messenger --category e --msg "<command> command are used."
+                messenger --category e --msg "${package_check} is installed."
+                return 0;
+            elif type ${package_check} &> /dev/null; then
+                messenger --category e --msg "<type> command are used."
+                messenger --category e --msg "${package_check} is installed."
+                return 0;
+            else
+                messenger --category e --msg "${package_check} is not installed."
+                return 1;
+            fi
+        else
+            messenger --category e --msg "Unable to determine the package manager."
+            exit 1
+        fi
+    done
+
 }
 
-function messenger_c() {
-    line_divisor="+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-    echo "${line_divisor}"
-    echo "###### $*"
-    echo "${line_divisor}"
-}
+function create_backup_file() {
+    echo "# creating backup file..."
 
-function messenger_d() {
-    line_divisor="-------------------------------------------------------------------"
-    echo "${line_divisor}"
-    echo "#### $*"
-    echo "${line_divisor}"
-}
+    # Check if the number of arguments is correct
+    if [ $# -eq 0 ]; then
+        messenger --category e --msg "Usage: create_backup_file <file>"
+        exit 1
+    fi
 
-function messenger_e() {
-    line_divisor="..........................................................."
-    echo "${line_divisor}"
-    echo "## $*"
-    echo "${line_divisor}"
+    local config_file_to_backup="$1"
+
+    # Check if the file exists
+    if [ -f ${config_file_to_backup} ]; then
+        local date_info="$(date +"Y%Ym%md%d-H%HM%MS%S")"
+        local backup_file="${config_file_to_backup}.bkp-${date_info}"
+        messenger --category e --msg "making backup file ${backup_file}"
+        cp ${config_file_to_backup} ${backup_file}
+    else
+        messenger --category e --msg "backup file not exist. skipping..."
+    fi
+
 }
 
 # end complement functions
 # ============================== #
 # start main functions
 ##########################################################
+## install steps
+
+#############
+# pre install server
 
 function pre_install_server () {
-    messenger_b "Pre install server step"
+    messenger --category b --msg "Pre install server step"
 
     function install_generic_tools() {
-        messenger_c "Install Generic Tools"
+        messenger --category c --msg "Install Generic Tools"
 
         # update repository
-        apt update
+        apt update -qq >> /dev/null
 
         #### start generic tools
         # install basic network tools
-        apt install -y iputils-ping net-tools iproute2 traceroute mtr
+        #apt install -y iputils-ping net-tools iproute2 traceroute mtr
+        local generic_tools_packages_name="iputils-ping net-tools iproute2 traceroute mtr"
         # install advanced network tools
-        apt install -y tcpdump nmap netcat
+        #apt install -y tcpdump nmap netcat
+        local generic_tools_packages_name="${generic_tools_packages_name} tcpdump nmap netcat"
         # install DNS tools
-        apt install -y dnsutils
+        #apt install -y dnsutils
+        local generic_tools_packages_name="${generic_tools_packages_name} dnsutils"
         # install process inspector
-        apt install -y procps htop psmisc
+        #apt install -y procps htop psmisc
+        local generic_tools_packages_name="${generic_tools_packages_name} procps htop psmisc"
         # install text editors
-        apt install -y nano vim
+        #apt install -y nano vim
+        local generic_tools_packages_name="${generic_tools_packages_name} nano vim"
         # install web-content downloader tools
-        apt install -y wget curl
+        #apt install -y wget curl
+        local generic_tools_packages_name="${generic_tools_packages_name} wget curl"
         # install uncompression tools
-        apt install -y unzip tar
+        #apt install -y unzip tar
+        local generic_tools_packages_name="${generic_tools_packages_name} unzip tar"
         # install file explorer with CLI
-        apt install -y mc
+        #apt install -y mc
+        local generic_tools_packages_name="${generic_tools_packages_name} mc"
         # install task scheduler
-        apt install -y cron
+        #apt install -y cron
+        local generic_tools_packages_name="${generic_tools_packages_name} cron"
         # install log register
-        apt install -y rsyslog
+        #apt install -y rsyslog
+        local generic_tools_packages_name="${generic_tools_packages_name} rsyslog"
         #### stop generic tools
+
+        ## installing packages
+        apt install -y ${generic_tools_packages_name}
+
     }
+
 
     install_generic_tools
+   
 }
 
-##########################################################
-## install steps
-
+#############################
+## install packages
 function install_docker () {
     # installing docker
-    messenger_c "Installing docker"
+    messenger --category c --msg "Installing docker"
 
     function install_dependencies () {
         # install dependencies from project
-        messenger_d "Installing Dependencies"
-        apt install -y apt-transport-https software-properties-common wget
-        apt install -y gpg
+        messenger --category d --msg "Installing Dependencies"
+        echo "this step is not configured"
+        # update repository
+        apt update -qq >> /dev/null
+        apt install -y curl 
     }
 
     function install_from_source () {
         # Installing from Source
-        messenger_d "Installing from Source"
+        messenger --category d --msg "Installing from Source"
+        echo "this step is not configured"
+        # configure
+        # make
+        # make install
+    }
+
+    function install_from_apt () {
+        # Installing from APT
+        messenger --category d --msg " Installing from APT"
+        echo "this step is not configured"
+        #apt install -y ...
+    }
+
+    function install_from_ofc_tool() {
+        # Installing from Official TOOL
+        messenger --category d --msg "Installing from Official tool"
+        #echo "this step is not configured"
+        curl -fsSL https://get.docker.com | bash        
+    }
+
+    function install_from_rick0x00_tool() {
+        # Installing from Official TOOL
+        messenger --category d --msg "Installing from Official tool"
+        #echo "this step is not configured"
+        #curl -fsSL https://get.rick0x00.com | bash        
+    }
+
+    function install_complements () {
+        messenger --category d --msg " Installing Complements"
         echo "this step is not configured"       
-    }
-
-    function install_from_apt () {
-        # Installing from APT
-        messenger_d " Installing from APT"
-        
-        messenger_e "Setting docker repository"
-        mkdir -p /etc/apt/keyrings/
-        wget -q -O - https://apt.docker.com/gpg.key | gpg --dearmor | tee /etc/apt/keyrings/docker.gpg > /dev/null 
-        echo "deb [signed-by=/etc/apt/keyrings/docker.gpg] https://apt.docker.com stable main" | tee -a /etc/apt/sources.list.d/docker.list
-        apt update
-        
-        messenger_e "Installing docker"
-        apt install -y docker
-    }
-
-    function install_complements () {
-        messenger_d " Installing Complements"
         #apt install -y ...
     }
 
-    install_dependencies
+    # check if docker is installed
+    check_software_is_installed "docker"
+    if [ $? -ne 0 ]; then
 
-    ## Installing docker From Source ##
-    #install_from_source
+        ## installing docker dependencies
+        install_dependencies
 
-    ## Installing docker From APT (Debian package manager) ##
-    install_from_apt
+        ## Installing docker From Source ##
+        #install_from_source
 
-    #install_complements;
+        ## Installing docker From APT (Debian package manager) ##
+        #install_from_apt
 
-}
+        ## Installing docker from official tool ##
+        install_from_ofc_tool
 
-function install_supervisor () {
-    # installing supervisor
-    messenger_c "Installing supervisor"
+        ## Installing docker from rick0x00 tool ##
+        #install_from_rick0x00_tool
 
-    function install_dependencies () {
-        # install dependencies from project
-        messenger_d "Installing Dependencies"
-        echo "this step is not configured"
-        #apt install -y ...
-    }
-
-    function install_from_source () {
-        # Installing from Source
-        messenger_d "Installing from Source"
-        echo "this step is not configured"
-    }
-
-    function install_from_apt () {
-        # Installing from APT
-        messenger_d " Installing from APT"
-        apt install -y supervisor
-    }
-
-    function install_complements () {
-        messenger_d " Installing Complements"
-        echo "this step is not configured"
-        #apt install -y ...
-    }
-
-    #install_dependencies
-
-    ## Installing supervisor From Source ##
-    #install_from_source
-
-    ## Installing supervisor From APT (Debian package manager) ##
-    install_from_apt
-
-    #install_complements;
+        ## Installing docker complements
+        #install_complements;
+    else
+         messenger --category d --msg " Docker is already installed"
+    fi 
 
 }
 
 #############################
 
 function install_server () {
-    messenger_b "Install server step"
+    messenger --category b --msg "Install server step"
 
     ##  docker
     install_docker
-    ##  supervisor
-    install_supervisor
 }
 
 ##########################################################
@@ -272,19 +430,20 @@ function install_server () {
 
 function start_docker () {
     # starting docker
-    messenger_c "Starting docker"
+    messenger --category c --msg "Starting docker"
 
     #service docker start
     #systemctl start docker
     /etc/init.d/docker start    
 
     # Daemon running on foreground mode
-    #docker -f
+    export DOCKER_DAEMON_FOREGROUND_EXECUTION_COMMAND='/usr/bin/dockerd'
+    #eval ${DOCKER_DAEMON_FOREGROUND_EXECUTION_COMMAND}
 }
 
 function stop_docker () {
     # stopping docker
-    messenger_c "Stopping docker"
+    messenger --category c --msg "Stopping docker"
 
     #service docker stop
     #systemctl stop docker
@@ -297,92 +456,47 @@ function stop_docker () {
 
 function enable_docker () {
     # Enabling docker
-    messenger_c "Enabling docker"
+    messenger --category c --msg "Enabling docker"
 
     systemctl enable docker
 }
 
 function disable_docker () {
     # Disabling docker
-    messenger_c "Disabling docker"
+    messenger --category c --msg "Disabling docker"
 
     systemctl disable docker
-}
-
-##############
-
-function start_supervisor () {
-    # starting supervisor
-    messenger_c "Starting supervisor"
-
-    #service supervisor start
-    #systemctl start supervisor
-    /etc/init.d/supervisor start
-
-    # Daemon running on foreground mode
-    #/usr/bin/python3 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf -n
-}
-
-function stop_supervisor () {
-    # stopping supervisor
-    messenger_c "Stopping supervisor"
-
-    #service supervisor stop
-    #systemctl stop supervisor
-    /etc/init.d/supervisor stop
-
-    # ensuring it will be stopped
-    # for Daemon running on foreground mode
-    killall supervisor
-}
-
-function enable_supervisor () {
-    # Enabling supervisor
-    messenger_c "Enabling supervisor"
-
-    systemctl enable supervisor
-}
-
-function disable_supervisor () {
-    # Disabling supervisor
-    messenger_c "Disabling supervisor"
-
-    systemctl disable supervisor
 }
 
 #############################
 
 function start_server () {
-    messenger_b "Starting server step"
+    messenger --category b --msg "Starting server step"
     # Starting Service
 
     # starting docker
     start_docker
-    start_supervisor
 }
 
 function stop_server () {
-    messenger_b "Stopping server step"
+    messenger --category b --msg "Stopping server step"
 
     # stopping server
     stop_docker
-    stop_supervisor
 }
 
 function enable_server () {
-    messenger_b "Enable server step"
+    messenger --category b --msg "Enable server step"
 
     # enabling server
     enable_docker
-    enable_supervisor
 }
 
 function disable_server () {
-    messenger_b "Disabling server step"
+    messenger --category b --msg "Disabling server step"
 
     # stopping server
     disable_docker
-    disable_supervisor
 }
 
 ##########################################################
@@ -390,60 +504,28 @@ function disable_server () {
 
 function configure_docker() {
     # Configuring docker
-    messenger_c "Configuring docker"
+    messenger --category c --msg "Configuring docker"
 
-    local docker_admin_user="${ADMIN_USER:-admin}"
-    local docker_admin_password="${ADMIN_PASSWORD:-admin}"
-    local docker_admin_email="${ADMIN_EMAIL:-admin@localhost}"
-    local docker_protocol="${WEB_PROTOCOL:-http}"
-    local docker_http_port="${HTTP_PORT[0]:-3000}"
-    local docker_domain=${FQDN}
-    local docker_enable_gzip=${ENABLE_GZIP:-false}
-    local docker_cert_file="${CERT_FILE}"
-    local docker_cert_key="${CERT_KEY}"
+    local docker_dns_server_address_ipv4="${DNS_SERVER_ADDRESS_IPv4:-admin}"
 
 
-    local date_info="$(date +"Y%Ym%md%d-H%HM%MS%S")"
-    local config_file="/etc/docker/docker.ini"
-    local backup_file="${config_file}.bkp-${date_info}"
-    messenger_e "making backup file ${backup_file}"
-    cp ${config_file} ${backup_file}
+    config_file="/etc/docker/daemon.json"
 
+    # setting backup of config
+    create_backup_file "${config_file}"
 
     function configure_docker_security() {
         # Configuring docker Security
-        messenger_d "Configuring docker Security"
-
-        messenger_e "Setting Access of docker"
-        # Setting Access of docker
-        sed -i "s|^;\?admin_user =.*|admin_user = ${docker_admin_user}|" ${config_file}
-        sed -i "s|^;\?admin_password =.*|admin_password = ${docker_admin_password}|" ${config_file}
-        sed -i "s|^;\?admin_email =.*|admin_email = ${docker_admin_email}|" ${config_file}
-
+        messenger --category d --msg "Configuring docker Security"
+        echo "this step is not configured"
     }
 
     function configure_docker_configs() {
         # Configuring docker
-        messenger_d "Configuring docker configs"
+        messenger --category d --msg "Configuring docker configs"
+        #echo "this step is not configured"       
 
-        sed -i "s|^;\?protocol =.*|protocol = ${docker_protocol}|" ${config_file}
-        sed -i "s|^;\?http_port =.*|http_port = ${docker_http_port}|" ${config_file}
-        sed -i "s|^;\?domain =.*|domain = ${docker_domain}|" ${config_file}
-        sed -i "s|^;\?enable_gzip =.*|enable_gzip = ${docker_enable_gzip}|" ${config_file}
-
-        if [ "${WEB_PROTOCOL}" = "https" ]; then
-            echo "# Setting SSL: Configuring..."
-            if [ -n "${CERT_FILE}" ] && [ -n "${CERT_KEY}" ] ; then
-                echo "# Files specifieds"
-                sed -i "s|^;\?cert_file =.*|cert_file = ${docker_cert_file}|" ${config_file}
-                sed -i "s|^;\?cert_key =.*|cert_key = ${docker_cert_key}|" ${config_file}
-            else
-                echo "# ERROR: Files not specified"
-                exit 1
-            fi
-        else
-            echo "# Setting SSL: skipping..."
-        fi
+        echo "{ \"dns\" : [ \"${docker_dns_server_address_ipv4}\" ] }" > ${config_file}
 
     }
 
@@ -454,42 +536,16 @@ function configure_docker() {
     configure_docker_configs
 }
 
-function configure_supervisor() {
-    # Configuring supervisor
-    messenger_c "Configuring Supervisor"
-
-    local supervisor_program_managed_name="docker"
-    local supervisor_program_managed_execution_command="${docker_DAEMON_FOREGROUND_EXECUTION_COMMAND}"
-    local supervisor_config_path="/etc/supervisor/conf.d/"
-    local supervisor_config_file="${supervisor_config_path}${supervisor_program_managed_name}.conf"
-
-    echo "
-    [program:${supervisor_program_managed_name}]
-    command=bash -c '"${supervisor_program_managed_execution_command}"'
-    autostart=true  
-    autorestart=true
-    startsecs=2
-    startretries=10
-    stderr_logfile=/var/log/supervisor/%(program_name)s.stderr.log
-    stdout_logfile=/var/log/supervisor/%(program_name)s.stdout.log
-    redirect_stderr=true
-    redirect_stdout=true
-    " > ${supervisor_config_file}
-
-    remove_space_from_beginning_of_line "4" "${supervisor_config_file}"
-}
 
 #############################
 
 function configure_server () {
     # configure server
-    messenger_b "Configure server"
+    messenger --category b --msg "Configure server"
 
     # configure docker
     configure_docker
 
-    # configure supervisor
-    configure_supervisor
 }
 
 ##########################################################
@@ -497,27 +553,19 @@ function configure_server () {
 
 function check_configs_docker() {
     # Check config of docker
-    messenger_c "Check config of docker"
+    messenger --category c --msg "Check config of docker"
     echo "# docker not support config test command"
 
     #dockerctl configtest
 }
 
-function check_configs_supervisor() {
-    # Check config of supervisor
-    messenger_c "Check config of supervisor"
-    echo "# supervisor not support config test command"
-    #supervisor configtest
-}
-
 #############################
 
 function check_configs () {
-    messenger_b "Check Configs server"
+    messenger --category b --msg "Check Configs server"
 
     # check if the configuration file is ok.
     check_configs_docker
-    check_configs_supervisor
 
 }
 
@@ -526,99 +574,31 @@ function check_configs () {
 
 function test_docker () {
     # Testing docker
-    messenger_c "Testing of docker"
+    messenger --category c --msg "Testing of docker"
 
 
     # is running ????
     #service docker status
     #systemctl status --no-pager -l docker
     /etc/init.d/docker status
-    ps -ef --forest | grep docker
-
-    # is listening ?
-    ss -pultan | grep :${HTTP_PORT[0]}
+    ps -ef --forest | grep .*docker.* | grep -v "grep"
 
     # is creating logs ????
     tail /var/log/docker/*
 
-    # Validating...
-
-    ## scanning docker ports using NETCAT
-    nc -zv localhost ${HTTP_PORT[0]}
-    #root@docker:~# nc -zv localhost 80
-    #Connection to localhost (::1) 80 port [tcp/http] succeeded!
-
-    ## scanning docker ports using NMAP
-    nmap -A localhost -sT -p ${HTTP_PORT[0]}
-    #root@docker:~# nmap -A localhost -sT -p 80
-    #Starting Nmap 7.80 ( https://nmap.org ) at 2024-01-04 05:54 UTC
-    #Nmap scan report for localhost (127.0.0.1)
-    #Host is up (0.000091s latency).
-    #Other addresses for localhost (not scanned): ::1
-    #
-    #PORT   STATE SERVICE VERSION
-    #80/tcp open  http    docker httpd 2.4.56 ((Debian))
-    #|_http-server-header: docker/2.4.56 (Debian)
-    #| http-title: docker &rsaquo; Setup Configuration File
-    #|_Requested resource was http://localhost/wp-admin/setup-config.php
-    #Warning: OSScan results may be unreliable because we could not find at least 1 open and 1 closed port
-    #Device type: general purpose
-    #Running: Linux 2.6.X
-    #OS CPE: cpe:/o:linux:linux_kernel:2.6.32
-    #OS details: Linux 2.6.32
-    #Network Distance: 0 hops
-    #
-    #OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
-    #Nmap done: 1 IP address (1 host up) scanned in 8.56 seconds
-
-    # specific tool of commands to test
-    curl --head http://localhost:${HTTP_PORT[0]}
-    #root@docker:~# curl --head http://localhost:${HTTP_PORT[0]}
-    #HTTP/1.1 302 Found
-    #Cache-Control: no-store
-    #Content-Type: text/html; charset=utf-8
-    #Location: /login
-    #X-Content-Type-Options: nosniff
-    #X-Frame-Options: deny
-    #X-Xss-Protection: 1; mode=block
-    #Date: Sat, 20 Jan 2024 22:41:14 GMT
+    # Validating... (using specific commands)
+    docker version
+    docker compose version
 
 }
-
-function test_supervisor () {
-    # Testing supervisor
-    messenger_c "Testing of supervisor"
-
-
-    # is running ????
-    #service supervisor status
-    #systemctl status  --no-pager -l supervisor
-    /etc/init.d/supervisor status
-    ps -ef --forest | grep supervisor
-
-    # is listening ?
-    ss -pultan | grep :${port_supervisor[0]}
-
-    # is creating logs ????
-    tail /var/log/supervisor/*
-
-    # Validating...
-
-    # specific tool of commands to test
-    supervisorctl status
-}
-
 
 #############################
 
 function test_server () {
-    messenger_b "Testing server"
+    messenger --category b --msg "Testing server"
 
     # testing docker
     test_docker
-
-    # testing supervisor
-    test_supervisor
 }
 
 ##########################################################
@@ -633,18 +613,15 @@ function test_server () {
 # end argument reading
 # ============================================================ #
 # start main executions of code
-messenger_a "Starting docker installation script"
+check_os_system
+messenger --category a --msg "Starting docker installation script"
 pre_install_server;
 install_server;
 stop_server;
 disable_server;
 configure_server;
 check_configs;
-##start_server;
-start_supervisor;
-##enable_server;
-enable_supervisor;
+start_server;
+enable_server;
 test_server;
-messenger_a "Finished docker installation script"
-
-
+messenger --category a --msg "Finished docker installation script"
